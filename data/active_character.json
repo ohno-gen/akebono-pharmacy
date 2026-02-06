@@ -1,0 +1,20 @@
+{
+  "selections": {
+    "triple": {
+      "id": "character-1770273170974",
+      "imageFile": "character-1770273170974.png",
+      "videoFile": "character-1770273170974.mp4"
+    },
+    "quint": {
+      "id": "character-1767966185483",
+      "imageFile": "character-1767966185483.png",
+      "videoFile": "character-1767966185483.mp4"
+    },
+    "single": {
+      "id": "character-1770273170974",
+      "imageFile": "character-1770273170974.png",
+      "videoFile": "character-1770273170974.mp4"
+    }
+  },
+  "updatedAt": "2026-02-05T06:34:36.824Z"
+}

@@ -1,0 +1,36 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #fff;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+    position: relative;
+    min-height: 100vh;
+}
+
+.container {
+    position: relative;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 540px;
+    min-height: 540px;
+    overflow: hidden;
+    background: transparent;
+}
+
+.stable-video {
+    position: absolute;
+    display: none;
+    z-index: 1000;
+    background: transparent;
+    object-fit: contain;
+}
+
+.stable-video.playing {
+    display: block;
+}

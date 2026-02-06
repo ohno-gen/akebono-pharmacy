@@ -1,0 +1,19 @@
+{
+  "name": "shelf-signage",
+  "version": "1.0.0",
+  "description": "Hall sensor signage display",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": ["electron", "arduino", "serial", "signage"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}
