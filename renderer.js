@@ -12,12 +12,35 @@ const { pathToFileURL } = require('url');
 
 const VIDEO_BASENAME = 'agent-output';
 const VIDEO_EXTENSIONS = ['webm', 'mov', 'mp4'];
+const PRICE_TAG_LAYER_ID = 'priceTagLayer';
+const DISPLAY_WIDTH_PX = 1920;
 
 const videoPool = new Map();
-let stableVideoXByRow = [950, 300, 950, 300, 300];
+let stableVideoXByRow = [950, 350, 950, 300, 300];
+const PRICE_TAG_COUNTS = [17, 14, 0, 0, 0];
+const PRICE_TAG_X_POSITIONS = [
+    generateEvenXPositions(PRICE_TAG_COUNTS[0], DISPLAY_WIDTH_PX, 16, 16),
+    generateEvenXPositions(PRICE_TAG_COUNTS[1], DISPLAY_WIDTH_PX, 16, 16),
+    [],
+    [],
+    []
+];
 
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
+}
+
+function generateEvenXPositions(count, widthPx, leftPadding = 0, rightPadding = 0) {
+    const total = Math.max(0, count);
+    if (total === 0) {
+        return [];
+    }
+    const usableWidth = Math.max(0, widthPx - leftPadding - rightPadding);
+    if (total === 1) {
+        return [Math.round(leftPadding + usableWidth / 2)];
+    }
+    const step = usableWidth / (total - 1);
+    return Array.from({ length: total }, (_, i) => Math.round(leftPadding + step * i));
 }
 
 function debugLog(message) {
@@ -39,6 +62,15 @@ function resolveVideoFileUrl() {
     }
     debugLog(`video file missing: ${path.join(baseDir, `${VIDEO_BASENAME}.[${VIDEO_EXTENSIONS.join(',')}]`)}`);
     return null;
+}
+
+function resolvePriceTagFileUrl(rowNumber, index) {
+    const filePath = path.join(__dirname, 'assets', 'media', 'price-tag', `price${rowNumber}_${index}.png`);
+    if (!fs.existsSync(filePath)) {
+        debugLog(`price tag missing: ${filePath}`);
+        return null;
+    }
+    return pathToFileURL(filePath).toString();
 }
 
 function getTemplateVideo() {
@@ -125,6 +157,66 @@ function calculateStableVideoPlacement(row, x, video) {
         width,
         height
     };
+}
+
+function ensurePriceTagLayer() {
+    const container = document.querySelector('.container');
+    if (!container) {
+        return null;
+    }
+    let layer = document.getElementById(PRICE_TAG_LAYER_ID);
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = PRICE_TAG_LAYER_ID;
+        layer.className = 'price-tag-layer';
+        container.appendChild(layer);
+    }
+    return layer;
+}
+
+function loadAndResizeImage(src, heightPx) {
+    const img = new Image();
+    img.className = 'price-tag';
+    img.style.height = `${heightPx}px`;
+    img.style.width = 'auto';
+    img.style.objectFit = 'contain';
+    img.style.pointerEvents = 'none';
+    img.draggable = false;
+    img.src = src;
+    return img;
+}
+
+function buildPriceTags() {
+    const layer = ensurePriceTagLayer();
+    if (!layer) {
+        debugLog('price tag layer missing');
+        return;
+    }
+    layer.innerHTML = '';
+
+    for (let rowIndex = 0; rowIndex < DISPLAY_ROW_COUNT; rowIndex += 1) {
+        const count = PRICE_TAG_COUNTS[rowIndex] || 0;
+        if (count <= 0) {
+            continue;
+        }
+        const rowNumber = rowIndex + 1;
+        const positions = Array.isArray(PRICE_TAG_X_POSITIONS[rowIndex])
+            ? PRICE_TAG_X_POSITIONS[rowIndex]
+            : [];
+        const fallbackPositions = generateEvenXPositions(count, DISPLAY_WIDTH_PX, 16, 16);
+
+        for (let i = 0; i < count; i += 1) {
+            const src = resolvePriceTagFileUrl(rowNumber, i + 1);
+            if (!src) {
+                continue;
+            }
+            const img = loadAndResizeImage(src, ROW_HEIGHT_PX);
+            const x = Number.isFinite(positions[i]) ? positions[i] : fallbackPositions[i] || 0;
+            img.style.left = `${x}px`;
+            img.style.top = `${rowIndex * ROW_HEIGHT_PX}px`;
+            layer.appendChild(img);
+        }
+    }
 }
 
 function applyStableVideoEntry(video, row, targetX) {
@@ -331,6 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (container) {
         container.style.height = `${ROW_HEIGHT_PX * DISPLAY_ROW_COUNT}px`;
     }
+    buildPriceTags();
     initializeStableVideos();
 
     window.addEventListener('resize', () => {
