@@ -27,3 +27,4 @@ npm run dev
 ```
 `--dev` オプションで DevTools が開きます。
 # akebono-pharmacy
+# akebono-pharmacy
