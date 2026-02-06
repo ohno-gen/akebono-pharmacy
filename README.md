@@ -62,5 +62,22 @@ let stableVideoXByRow = [950, 300, 950, 300, 300];
 
 1段目〜5段目の順で、**ピクセル指定**です。  
 値を変えると、その段で再生される動画の横位置が変わります。
+
+### 値札番号で位置指定（任意）
+値札の番号を基準に、動画の位置を決めることもできます。  
+`PRICE_TAG_VIDEO_ANCHORS` に `tagIndex`（値札番号）と `offsetPx` を指定します。
+
+```js
+const PRICE_TAG_VIDEO_ANCHORS = [
+  { tagIndex: 1, offsetPx: 50 },
+  null,
+  null,
+  null,
+  null
+];
+```
+
+この場合、1段目の動画は「1番の値札のX座標 + 50px」になります。  
+設定がある段は `stableVideoXByRow` より優先されます。
 # akebono-pharmacy
 # akebono-pharmacy

@@ -25,6 +25,13 @@ const PRICE_TAG_X_POSITIONS = [
     [],
     []
 ];
+const PRICE_TAG_VIDEO_ANCHORS = [
+    { tagIndex: 1, offsetPx: 40 }, 
+    null,
+    null,
+    null,
+    null
+];
 
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
@@ -41,6 +48,24 @@ function generateEvenXPositions(count, widthPx, leftPadding = 0, rightPadding = 
     }
     const step = usableWidth / (total - 1);
     return Array.from({ length: total }, (_, i) => Math.round(leftPadding + step * i));
+}
+
+function getResolvedPriceTagPositions(rowIndex) {
+    const count = PRICE_TAG_COUNTS[rowIndex] || 0;
+    if (count <= 0) {
+        return [];
+    }
+    const basePositions = Array.isArray(PRICE_TAG_X_POSITIONS[rowIndex])
+        ? PRICE_TAG_X_POSITIONS[rowIndex]
+        : [];
+    const fallbackPositions = generateEvenXPositions(count, DISPLAY_WIDTH_PX, 16, 16);
+    const resolved = [];
+
+    for (let i = 0; i < count; i += 1) {
+        const raw = basePositions[i];
+        resolved.push(Number.isFinite(raw) ? raw : (fallbackPositions[i] || 0));
+    }
+    return resolved;
 }
 
 function debugLog(message) {
@@ -126,6 +151,15 @@ function getVideoAspectRatio(video, fallback = FALLBACK_VIDEO_ASPECT) {
 }
 
 function getStableVideoXForRow(row) {
+    const anchor = PRICE_TAG_VIDEO_ANCHORS[row];
+    if (anchor && Number.isFinite(anchor.tagIndex)) {
+        const positions = getResolvedPriceTagPositions(row);
+        const idx = Math.max(0, Math.floor(anchor.tagIndex) - 1);
+        if (idx >= 0 && idx < positions.length) {
+            const offset = Number.isFinite(anchor.offsetPx) ? anchor.offsetPx : 50;
+            return positions[idx] + offset;
+        }
+    }
     const x = stableVideoXByRow[row];
     return Number.isFinite(x) ? x : DEFAULT_STABLE_X_PX;
 }
@@ -200,10 +234,7 @@ function buildPriceTags() {
             continue;
         }
         const rowNumber = rowIndex + 1;
-        const positions = Array.isArray(PRICE_TAG_X_POSITIONS[rowIndex])
-            ? PRICE_TAG_X_POSITIONS[rowIndex]
-            : [];
-        const fallbackPositions = generateEvenXPositions(count, DISPLAY_WIDTH_PX, 16, 16);
+        const resolvedPositions = getResolvedPriceTagPositions(rowIndex);
 
         for (let i = 0; i < count; i += 1) {
             const src = resolvePriceTagFileUrl(rowNumber, i + 1);
@@ -211,7 +242,7 @@ function buildPriceTags() {
                 continue;
             }
             const img = loadAndResizeImage(src, ROW_HEIGHT_PX);
-            const x = Number.isFinite(positions[i]) ? positions[i] : fallbackPositions[i] || 0;
+            const x = resolvedPositions[i] || 0;
             img.style.left = `${x}px`;
             img.style.top = `${rowIndex * ROW_HEIGHT_PX}px`;
             layer.appendChild(img);
