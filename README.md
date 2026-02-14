@@ -27,8 +27,26 @@ npm run dev
 ```
 `--dev` オプションで DevTools が開きます。
 
+## Arduino セットアップ
+1. Arduino IDE で `Arduino/tagbeans/tagbeans.ino` を開く
+2. 赤外線センサを `SENSOR_PIN = 6`（デジタル6番）に接続する
+3. ボード/ポートを選択して書き込む
+4. USB接続したまま、このアプリを `npm start` で起動する
+
+補足:
+- ボーレートは `115200` です（スケッチとアプリ側で合わせています）。
+- Electron 側は Arduino のシリアルポートを自動検出します。
+- このアプリで有効なのは `SENSOR_DETECTED` 行のみです（数値行 `1`〜`5` は無視）。
+- 自動検出で拾えない場合は `SENSOR_SERIAL_PORT=/dev/tty.usbmodemxxxx npm start` のようにポートを明示指定できます。
+
 ## キー操作
 - `1`〜`5`：押した段の動画を表示 / 同じキーをもう一度押すと消える（ON/OFF）
+
+## 赤外線センサ連動
+- Arduino のシリアル入力で `SENSOR_DETECTED` を受け取ると、**現在再生中の動画だけ**を先頭（0秒）から再生し直します。
+- `SENSOR_DETECTED` 自体は「新規再生トリガー」ではありません。再生中の動画がない場合は何もしません。
+- センサで再スタートした直後は、動画が1回最後まで再生されるまで次の `SENSOR_DETECTED` は無視します。
+- Arduino 側の互換出力（`1`〜`5` などの数値行）は無視されます。
 
 ## 値札（price-tag）の座標調整
 値札は `assets/media/price-tag/price{段}_{番号}.png` を読み込みます。  

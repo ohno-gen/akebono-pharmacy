@@ -9,11 +9,24 @@ const { ipcRenderer } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
+let SerialPort = null;
+try {
+    ({ SerialPort } = require('serialport'));
+} catch (error) {
+    console.error('serialport load failed:', error);
+}
 
 const VIDEO_BASENAME = 'agent-output';
 const VIDEO_EXTENSIONS = ['webm', 'mov', 'mp4'];
 const PRICE_TAG_LAYER_ID = 'priceTagLayer';
 const DISPLAY_WIDTH_PX = 1920;
+const SENSOR_SERIAL_BAUD_RATE = 115200;
+const SENSOR_SERIAL_PORT_OVERRIDE = (process.env.SENSOR_SERIAL_PORT || '').trim();
+
+let sensorSerialPort = null;
+let sensorSerialBuffer = '';
+let sensorRestartLocked = false;
+let sensorRestartPendingEnds = 0;
 
 const videoPool = new Map();
 let stableVideoXByRow = [950, 350, 950, 300, 300];
@@ -318,6 +331,28 @@ function clearStableLoopHandler(video) {
     }
 }
 
+function releaseSensorRestartLock(reason) {
+    sensorRestartLocked = false;
+    sensorRestartPendingEnds = 0;
+    if (reason) {
+        debugLog(`sensor restart lock released (${reason})`);
+    }
+}
+
+function clearSensorRestartUnlockHandler(video, countAsFinished = false) {
+    if (!video || !video._sensorRestartUnlockHandler) {
+        return;
+    }
+    video.removeEventListener('ended', video._sensorRestartUnlockHandler);
+    delete video._sensorRestartUnlockHandler;
+    if (countAsFinished && sensorRestartPendingEnds > 0) {
+        sensorRestartPendingEnds -= 1;
+        if (sensorRestartPendingEnds <= 0) {
+            releaseSensorRestartLock('stopped before ended');
+        }
+    }
+}
+
 function setupStableLoopHandler(video) {
     clearStableLoopHandler(video);
     video._stableLoopHandler = () => {
@@ -346,6 +381,7 @@ function stopVideo(video) {
     if (!video) {
         return;
     }
+    clearSensorRestartUnlockHandler(video, true);
     clearStableLoopHandler(video);
     video.pause();
     video.currentTime = 0;
@@ -357,17 +393,25 @@ function stopVideo(video) {
     }
 }
 
-function playStableVideoForRow(row) {
+function playStableVideoForRow(row, options = {}) {
+    const {
+        allowToggleOff = true,
+        forceRestart = false
+    } = options;
     const video = getVideoForRow(row);
     if (!video) {
         debugLog(`video element not found for row ${row + 1}`);
-        return;
+        return false;
     }
 
     if (video.dataset.stable === 'true' && video.classList.contains('playing')) {
-        debugLog(`toggle off row ${row + 1}`);
-        stopVideo(video);
-        return;
+        if (forceRestart) {
+            stopVideo(video);
+        } else if (allowToggleOff) {
+            debugLog(`toggle off row ${row + 1}`);
+            stopVideo(video);
+            return true;
+        }
     }
 
     video.loop = false;
@@ -376,7 +420,7 @@ function playStableVideoForRow(row) {
     const placement = applyStableVideoEntry(video, row, getStableVideoXForRow(row));
     if (!placement) {
         debugLog(`placement failed for row ${row + 1}`);
-        return;
+        return false;
     }
 
     video.dataset.stable = 'true';
@@ -406,6 +450,152 @@ function playStableVideoForRow(row) {
                 // ignore
             }
         });
+    }
+    return true;
+}
+
+function restartPlayingStableVideosFromBeginning() {
+    if (sensorRestartLocked) {
+        debugLog('sensor detected: ignored (waiting one full playback)');
+        return;
+    }
+
+    const activeVideos = [];
+    videoPool.forEach((video) => {
+        if (!video || video.dataset.stable !== 'true' || !video.classList.contains('playing')) {
+            return;
+        }
+        activeVideos.push(video);
+    });
+
+    if (activeVideos.length === 0) {
+        debugLog('sensor detected: no active video to restart');
+        return;
+    }
+
+    sensorRestartLocked = true;
+    sensorRestartPendingEnds = activeVideos.length;
+
+    let restarted = 0;
+    activeVideos.forEach((video) => {
+        clearSensorRestartUnlockHandler(video);
+        video._sensorRestartUnlockHandler = () => {
+            sensorRestartPendingEnds -= 1;
+            if (sensorRestartPendingEnds <= 0) {
+                releaseSensorRestartLock('playback ended');
+            }
+        };
+        video.addEventListener('ended', video._sensorRestartUnlockHandler, { once: true });
+
+        const row = parseInt(video.dataset.stableRow, 10);
+        if (Number.isFinite(row)) {
+            applyStableVideoEntry(video, row, getStableVideoXForRow(row));
+        }
+
+        video.pause();
+        video.currentTime = 0;
+        ensureStableVideoMetadataRecalc(video);
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+            playPromise.catch((error) => {
+                debugLog(`sensor restart play error: ${error?.message || error}`);
+                clearSensorRestartUnlockHandler(video, true);
+            });
+        }
+        restarted += 1;
+    });
+    debugLog(`sensor detected: restarted ${restarted} active video(s)`);
+}
+
+function handleSensorSerialLine(line) {
+    const text = typeof line === 'string' ? line.trim() : '';
+    if (!text) {
+        return;
+    }
+    debugLog(`sensor serial: ${text}`);
+    if (text === 'SENSOR_DETECTED') {
+        restartPlayingStableVideosFromBeginning();
+    }
+}
+
+function isLikelySensorPort(port) {
+    const pathText = `${port?.path || ''}`.toLowerCase();
+    const meta = `${port?.manufacturer || ''} ${port?.friendlyName || ''} ${port?.vendorId || ''} ${port?.productId || ''}`.toLowerCase();
+    const haystack = `${pathText} ${meta}`;
+
+    const looksLikeUsbSerial = haystack.includes('usbmodem')
+        || haystack.includes('usbserial')
+        || haystack.includes('wch')
+        || haystack.includes('arduino')
+        || haystack.includes('ch340')
+        || haystack.includes('cp210');
+    const clearlyNotDevice = haystack.includes('debug-console')
+        || haystack.includes('bluetooth')
+        || haystack.includes('tty.s')
+        || haystack.includes('cu.s');
+
+    return looksLikeUsbSerial && !clearlyNotDevice;
+}
+
+function formatPortSummary(port) {
+    return `${port.path || 'n/a'}|${port.manufacturer || 'n/a'}|${port.friendlyName || 'n/a'}|${port.vendorId || 'n/a'}:${port.productId || 'n/a'}`;
+}
+
+async function initializeSensorSerial() {
+    if (!SerialPort) {
+        debugLog('serialport unavailable');
+        return;
+    }
+    try {
+        const ports = await SerialPort.list();
+        if (!ports || ports.length === 0) {
+            debugLog('serial port not found');
+            return;
+        }
+        debugLog(`serial ports detected: ${ports.map(formatPortSummary).join(', ')}`);
+
+        let preferred = null;
+        if (SENSOR_SERIAL_PORT_OVERRIDE) {
+            preferred = ports.find((port) => port.path === SENSOR_SERIAL_PORT_OVERRIDE) || null;
+            if (!preferred) {
+                debugLog(`serial override not found: ${SENSOR_SERIAL_PORT_OVERRIDE}`);
+            }
+        }
+        if (!preferred) {
+            preferred = ports.find(isLikelySensorPort) || null;
+        }
+        if (!preferred) {
+            debugLog('sensor serial candidate not found (usbmodem/usbserial/arduino)');
+            return;
+        }
+
+        sensorSerialPort = new SerialPort({
+            path: preferred.path,
+            baudRate: SENSOR_SERIAL_BAUD_RATE,
+            autoOpen: true
+        });
+        debugLog(`serial open requested: ${preferred.path} @ ${SENSOR_SERIAL_BAUD_RATE}`);
+
+        sensorSerialPort.on('open', () => {
+            debugLog(`serial opened: ${preferred.path}`);
+        });
+
+        sensorSerialPort.on('error', (error) => {
+            debugLog(`serial error: ${error?.message || error}`);
+        });
+
+        sensorSerialPort.on('data', (chunk) => {
+            sensorSerialBuffer += chunk.toString('utf8');
+            let newlineIndex = sensorSerialBuffer.indexOf('\n');
+            while (newlineIndex >= 0) {
+                const line = sensorSerialBuffer.slice(0, newlineIndex);
+                sensorSerialBuffer = sensorSerialBuffer.slice(newlineIndex + 1);
+                handleSensorSerialLine(line);
+                newlineIndex = sensorSerialBuffer.indexOf('\n');
+            }
+        });
+    } catch (error) {
+        debugLog(`serial init failed: ${error?.message || error}`);
     }
 }
 
@@ -440,6 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     buildPriceTags();
     initializeStableVideos();
+    initializeSensorSerial();
 
     window.addEventListener('resize', () => {
         recalculateStableVideoPlacements();
@@ -455,7 +646,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const rowNumber = parseInt(e.key, 10);
         if (rowNumber >= 1 && rowNumber <= DISPLAY_ROW_COUNT) {
             debugLog(`key ${e.key} -> row ${rowNumber}`);
-            playStableVideoForRow(rowNumber - 1);
+            playStableVideoForRow(rowNumber - 1, {
+                allowToggleOff: true,
+                forceRestart: false
+            });
         } else {
             debugLog(`key ${e.key} ignored`);
         }
