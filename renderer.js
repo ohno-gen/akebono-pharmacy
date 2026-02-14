@@ -25,13 +25,6 @@ const PRICE_TAG_X_POSITIONS = [
     [],
     []
 ];
-const PRICE_TAG_VIDEO_ANCHORS = [
-    { tagIndex: 1, offsetPx: 40 }, 
-    null,
-    null,
-    null,
-    null
-];
 
 function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
@@ -151,15 +144,6 @@ function getVideoAspectRatio(video, fallback = FALLBACK_VIDEO_ASPECT) {
 }
 
 function getStableVideoXForRow(row) {
-    const anchor = PRICE_TAG_VIDEO_ANCHORS[row];
-    if (anchor && Number.isFinite(anchor.tagIndex)) {
-        const positions = getResolvedPriceTagPositions(row);
-        const idx = Math.max(0, Math.floor(anchor.tagIndex) - 1);
-        if (idx >= 0 && idx < positions.length) {
-            const offset = Number.isFinite(anchor.offsetPx) ? anchor.offsetPx : 50;
-            return positions[idx] + offset;
-        }
-    }
     const x = stableVideoXByRow[row];
     return Number.isFinite(x) ? x : DEFAULT_STABLE_X_PX;
 }
